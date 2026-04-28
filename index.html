@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VNU Mapper - Clean Architecture</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: { extend: { colors: { vnu_primary: '#2563eb', map_campus: '#faebd7', map_city: '#eef1f5' }, fontFamily: { sans: ['"Be Vietnam Pro"', 'sans-serif'] } } }
+        }
+    </script>
+
+    <style>
+        /* === 1. GLOBAL & SCROLLBAR === */
+        .leaflet-control-attribution { display: none !important; }
+        .leaflet-routing-container { background-color: #fff !important; color: #334155 !important; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 4px 15px rgba(0,0,0,0.1) !important; padding: 10px; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px;}
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px;}
+
+        /* === 2. MAP MARKERS & LABELS === */
+        .building-label { background: transparent; border: none; box-shadow: none; color: #1e293b; font-weight: 700; font-size: 13px; text-align: center; text-shadow: 0px 1px 3px rgba(255,255,255,0.8); pointer-events: none; }
+        .hust-marker { background: #fff; border: 1px solid #cbd5e1; border-radius: 50%; text-align: center; font-size: 13px; box-shadow: 0 2px 6px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; cursor: pointer;}
+        .deco-icon { background: transparent; border: none; box-shadow: none; font-size: 20px; pointer-events: none; filter: drop-shadow(0px 2px 2px rgba(0,0,0,0.2)); }
+        
+        /* Sports Specific Markers */
+        .vnu-sports-icon-small { background: #fff; border: 2px solid #e74c3c; border-radius: 50%; text-align: center; font-size: 14px; box-shadow: 0 2px 4px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+        .vnu-sports-label-clean { background: rgba(255, 255, 255, 0.85); border: 1px solid #e74c3c; border-radius: 4px; color: #e74c3c; font-weight: 700; font-size: 11px; padding: 2px 6px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1); pointer-events: none; white-space: nowrap; }
+
+        /* === 3. GPS RADAR ANIMATION === */
+        .gps-pulse { background: #3b82f6; border-radius: 50%; height: 16px; width: 16px; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 0 0 rgba(59, 130, 246, 1); animation: pulse-blue 2s infinite; }
+        @keyframes pulse-blue { 0% { transform: translate(-50%, -50%) scale(0.95); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); } 70% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 0 15px rgba(59, 130, 246, 0); } 100% { transform: translate(-50%, -50%) scale(0.95); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); } }
+
+        /* === 4. INDOOR MAP MODAL === */
+        .indoor-modal { display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.75); z-index: 2000; backdrop-filter: blur(4px); align-items: center; justify-content: center; }
+        .indoor-modal.active { display: flex; }
+        .indoor-content { background: white; border-radius: 16px; width: 90%; max-width: 800px; height: 85vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+        .indoor-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; background: #f8fafc; }
+        .indoor-body { display: flex; flex: 1; overflow: hidden; }
+        .floor-selector { width: 100px; background: #f1f5f9; border-right: 1px solid #e2e8f0; overflow-y: auto; padding: 10px 0; }
+        .floor-btn { display: block; width: 100%; padding: 12px; text-align: center; font-weight: bold; color: #64748b; border-bottom: 1px solid #e2e8f0; transition: all 0.2s; cursor: pointer; }
+        .floor-btn:hover { background: #e2e8f0; }
+        .floor-btn.active { background: #3b82f6; color: white; border-color: #2563eb; }
+        
+        .indoor-area { flex: 1; padding: 20px; overflow: auto; background: #f8fafc; display: flex; justify-content: center; align-items: center; }
+        .floor-plan-grid { display: grid; grid-template-columns: repeat(12, 40px); grid-template-rows: repeat(12, 40px); gap: 5px; width: fit-content; margin: auto; }
+        
+        .room { background: white; border: 2px solid #cbd5e1; border-radius: 6px; padding: 2px; text-align: center; font-size: 10px; font-weight: bold; color: #334155; display: flex; flex-direction: column; justify-content: center; align-items: center; box-shadow: 0 1px 2px rgba(0,0,0,0.05); transition: all 0.2s; word-wrap: break-word; }
+        .room:hover { transform: scale(1.02); z-index: 10; box-shadow: 0 4px 6px rgba(0,0,0,0.15); cursor: pointer; }
+        .room-ums { border-color: #3b82f6; background: #eff6ff; color: #1d4ed8; } 
+        .room-ulis { border-color: #8b5cf6; background: #f5f3ff; color: #6d28d9; } 
+        .room-wc { border-color: #94a3b8; background: #f1f5f9; color: #475569; }
+        .room-stairs { border-color: #fb923c; background: #fff7ed; color: #c2410c; }
+        .room-hallway { background: #e2e8f0; border: none; color: #64748b; font-weight: normal; font-size: 12px; letter-spacing: 2px; }
+    </style>
+</head>
+<body class="bg-map_city text-slate-800 h-screen overflow-hidden flex flex-col font-sans">
+
+    <header class="bg-white flex items-center justify-between px-6 py-4 shadow-sm border-b border-slate-200 z-[1000]">
+        <div class="text-xl font-extrabold tracking-wide text-slate-800"><span class="text-blue-600">VNU</span> MAPPER</div>
+        <div class="text-sm text-slate-500 font-medium hidden md:block">Clean Architecture v2.0</div>
+    </header>
+
+    <div class="flex-1 relative overflow-hidden">
+        <div id="map" class="w-full h-full bg-map_city"></div>
+        
+        <div class="absolute top-6 left-6 z-[1000] w-80 max-w-[calc(100vw-3rem)] shadow-2xl rounded-2xl">
+            <div class="relative">
+                <input type="text" id="search-input" placeholder="Tìm tòa nhà, quán cafe, thư viện..." autocomplete="off" class="w-full bg-white/95 backdrop-blur-md text-slate-800 px-5 py-3.5 pl-12 rounded-2xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all font-bold placeholder-slate-400">
+                <span class="absolute left-4 top-1/2 -translate-y-1/2 text-xl opacity-70">🔍</span>
+                <button id="clear-search" class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 hidden text-lg transition-colors">✖</button>
+            </div>
+            <ul id="search-results" class="absolute top-full left-0 w-full bg-white/95 backdrop-blur-md mt-2 rounded-xl shadow-xl border border-slate-100 hidden max-h-72 overflow-y-auto custom-scrollbar flex flex-col"></ul>
+        </div>
+
+        <button id="locate-btn" onclick="toggleGPS()" class="absolute top-6 right-6 bg-white text-blue-600 px-5 py-3 rounded-full shadow-lg border border-slate-200 hover:bg-slate-50 z-[1000] font-bold flex items-center gap-2 transition-all">
+            <span class="text-lg">📍</span> Vị trí của tôi
+        </button>
+
+        <div class="absolute bottom-5 left-5 bg-white/95 p-5 rounded-2xl text-[13px] border border-slate-200 shadow-xl z-[1000] max-h-[75vh] overflow-y-auto custom-scrollbar backdrop-blur-md hidden md:block w-56">
+            <div class="font-extrabold mb-3 text-slate-800 border-b border-slate-200 pb-2 uppercase tracking-wide text-xs">Thành viên VNU</div>
+            <div class="flex items-center gap-3 mb-2.5"><div class="w-4 h-4 rounded bg-[#3498db]"></div> <span class="font-medium text-slate-600">ULIS (Ngoại Ngữ)</span></div>
+            <div class="flex items-center gap-3 mb-2.5"><div class="w-4 h-4 rounded bg-[#e67e22]"></div> <span class="font-medium text-slate-600">UET (Công Nghệ)</span></div>
+            <div class="flex items-center gap-3 mb-2.5"><div class="w-4 h-4 rounded bg-[#e74c3c]"></div> <span class="font-medium text-slate-600">UEB (Kinh Tế)</span></div>
+            <div class="flex items-center gap-3 mb-2.5"><div class="w-4 h-4 rounded bg-[#2ecc71]"></div> <span class="font-medium text-slate-600">VNU-LS (Luật)</span></div>
+            <div class="flex items-center gap-3 mb-2.5"><div class="w-4 h-4 rounded bg-[#9b59b6]"></div> <span class="font-medium text-slate-600">UEd (Giáo Dục)</span></div>
+            <div class="flex items-center gap-3 mb-2.5"><div class="w-4 h-4 rounded bg-[#f1c40f]"></div> <span class="font-medium text-slate-600">SIS (Liên Ngành)</span></div>
+            <div class="flex items-center gap-3 mb-2.5"><div class="w-4 h-4 rounded bg-[#1abc9c]"></div> <span class="font-medium text-slate-600">VNU-HSB (QTKD)</span></div>
+            <div class="flex items-center gap-3 mb-2.5"><div class="w-4 h-4 rounded bg-[#34495e]"></div> <span class="font-medium text-slate-600">Hành chính</span></div>
+            <div class="flex items-center gap-3 mb-2.5"><div class="w-4 h-4 rounded border border-black bg-white"></div> <span class="font-medium text-slate-600">Chưa rõ</span></div>
+        </div>
+
+        <div id="infopanel" class="absolute right-[-400px] top-0 bottom-0 w-[360px] bg-white/95 backdrop-blur-xl border-l border-slate-200 shadow-[-10px_0_20px_rgba(0,0,0,0.05)] z-[1000] transition-all duration-300 ease-in-out p-0 flex flex-col">
+            <button onclick="closePanel()" class="absolute top-3 right-3 bg-black/40 hover:bg-black/60 text-white w-8 h-8 rounded-full font-bold transition flex items-center justify-center cursor-pointer z-10 backdrop-blur-sm">✕</button>
+            
+            <div class="w-full h-48 bg-slate-200 relative">
+                <img id="p-image" src="" alt="VNU" class="w-full h-full object-cover">
+                <div class="absolute bottom-0 w-full h-1/2 bg-gradient-to-t from-white to-transparent"></div>
+            </div>
+
+            <div class="custom-scrollbar flex-1 overflow-y-auto p-6">
+                <div id="p-name" class="text-2xl font-extrabold text-slate-800 mb-1 leading-tight">Đang tải...</div>
+                <div id="p-type" class="text-xs text-blue-600 uppercase tracking-widest font-bold mb-4">Hệ thống</div>
+                <div id="p-desc" class="text-sm text-slate-600 leading-relaxed space-y-3 pb-4 border-b border-slate-100"></div>
+                
+                <div id="indoor-map-container" class="mt-4 hidden">
+                    <button onclick="openIndoorMap()" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 px-4 rounded-xl shadow-md transition-all flex items-center justify-center gap-2">
+                        <span class="text-lg">🏢</span> Xem sơ đồ Tầng
+                    </button>
+                </div>
+            </div>
+            
+            <div class="p-4 bg-white border-t border-slate-100">
+                <button id="route-btn-panel" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl shadow-md transition-all hidden flex items-center justify-center gap-2">
+                    <span class="text-lg">🧭</span> Chỉ đường đến đây
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="indoorModal" class="indoor-modal">
+        <div class="indoor-content">
+            <div class="indoor-header">
+                <div>
+                    <h2 id="indoor-title" class="text-xl font-bold text-slate-800">Sơ đồ Tòa Nhà</h2>
+                    <p id="indoor-subtitle" class="text-sm text-slate-500">Hãy chọn tầng để xem chi tiết</p>
+                </div>
+                <button onclick="closeIndoorMap()" class="bg-slate-200 hover:bg-slate-300 text-slate-600 w-10 h-10 rounded-full font-bold transition flex items-center justify-center">✕</button>
+            </div>
+            <div class="indoor-body">
+                <div class="floor-selector custom-scrollbar" id="floorSelector"></div>
+                <div class="indoor-area custom-scrollbar">
+                    <div style="width: 100%;">
+                        <div class="flex items-center gap-4 mb-6 justify-center">
+                            <div class="font-bold text-lg text-slate-700" id="currentFloorTitle">Tầng 1</div>
+                            <div class="flex gap-3 text-xs">
+                                <span class="flex items-center gap-1"><span class="w-3 h-3 bg-blue-100 border border-blue-500 inline-block"></span> UMS (THCS)</span>
+                                <span class="flex items-center gap-1"><span class="w-3 h-3 bg-purple-100 border border-purple-500 inline-block"></span> ULIS / ĐHQG</span>
+                            </div>
+                        </div>
+                        <div class="floor-plan-grid" id="floorPlanGrid"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <svg width="0" height="0" class="absolute"><defs><linearGradient id="b2_gradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="50%" stop-color="#3498db" /><stop offset="50%" stop-color="#2ecc71" /></linearGradient></defs></svg>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+    <script src="js/indoor.js"></script>
+    <script src="js/map.js?v=2"></script> 
+</body>
+</html>
